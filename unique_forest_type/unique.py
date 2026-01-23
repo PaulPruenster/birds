@@ -58,13 +58,15 @@ def process_forest_data():
         if all_observations:
             combined_df = pd.concat(all_observations, ignore_index=True)
             
-            # Get unique scientific names
-            if 'scientific_name' in combined_df.columns:
-                unique_birds = set(combined_df['scientific_name'].dropna().unique())
+            # Get unique common names
+            if 'common_name' in combined_df.columns:
+                # Clean common names: remove extra spaces and handle potential duplicates
+                combined_df['common_name_clean'] = combined_df['common_name'].astype(str).str.strip()
+                unique_birds = set(combined_df['common_name_clean'].dropna().unique())
                 forest_birds[forest] = unique_birds
                 print(f"  Total unique birds in {forest}: {len(unique_birds)}")
             else:
-                print(f"  Warning: 'scientific_name' column not found in {forest}")
+                print(f"  Warning: 'common_name' column not found in {forest}")
                 forest_birds[forest] = set()
         else:
             print(f"  No valid observations found in {forest}")
@@ -76,11 +78,11 @@ def analyze_and_save_results(forest_birds):
     """Analyze the data and save results to CSV files"""
     
     # Create output directory
-    output_dir = Path("results")
+    output_dir = Path("results_common_name")
     output_dir.mkdir(exist_ok=True)
     
     print("\n" + "=" * 60)
-    print("ANALYSIS RESULTS")
+    print("ANALYSIS RESULTS (using common names)")
     print("=" * 60)
     
     # Check which forests have data
@@ -98,14 +100,14 @@ def analyze_and_save_results(forest_birds):
             birds = forest_birds[forest]
             if birds:
                 # Convert to DataFrame and save
-                df = pd.DataFrame(sorted(birds), columns=['scientific_name'])
+                df = pd.DataFrame(sorted(birds), columns=['common_name'])
                 output_file = output_dir / f"{forest}_unique_birds.csv"
                 df.to_csv(output_file, index=False)
                 print(f"{forest.upper()}: Saved {len(birds)} birds to {output_file}")
             else:
                 print(f"{forest.upper()}: No birds found (empty CSV will be created)")
                 # Create empty CSV
-                df = pd.DataFrame(columns=['scientific_name'])
+                df = pd.DataFrame(columns=['common_name'])
                 output_file = output_dir / f"{forest}_unique_birds.csv"
                 df.to_csv(output_file, index=False)
     
@@ -125,7 +127,7 @@ def analyze_and_save_results(forest_birds):
             unique_birds = birds_in_this_forest - birds_in_other_forests
             
             if unique_birds:
-                df = pd.DataFrame(sorted(unique_birds), columns=['scientific_name'])
+                df = pd.DataFrame(sorted(unique_birds), columns=['common_name'])
                 output_file = output_dir / f"{forest}_exclusive_birds.csv"
                 df.to_csv(output_file, index=False)
                 print(f"\n{forest.upper()} (exclusive: {len(unique_birds)}):")
@@ -138,7 +140,7 @@ def analyze_and_save_results(forest_birds):
             else:
                 print(f"\n{forest.upper()}: No exclusive birds")
                 # Create empty CSV
-                df = pd.DataFrame(columns=['scientific_name'])
+                df = pd.DataFrame(columns=['common_name'])
                 output_file = output_dir / f"{forest}_exclusive_birds.csv"
                 df.to_csv(output_file, index=False)
     
@@ -153,7 +155,7 @@ def analyze_and_save_results(forest_birds):
                        forest_birds['three'])
         
         if common_birds:
-            df = pd.DataFrame(sorted(common_birds), columns=['scientific_name'])
+            df = pd.DataFrame(sorted(common_birds), columns=['common_name'])
             output_file = output_dir / "common_to_all_forests.csv"
             df.to_csv(output_file, index=False)
             
@@ -164,30 +166,58 @@ def analyze_and_save_results(forest_birds):
         else:
             print("\nNo birds found in all three forests")
             # Create empty CSV
-            df = pd.DataFrame(columns=['scientific_name'])
+            df = pd.DataFrame(columns=['common_name'])
             output_file = output_dir / "common_to_all_forests.csv"
             df.to_csv(output_file, index=False)
     else:
         print(f"\nNeed data from all 3 forests for this comparison")
         print(f"Currently have data from: {valid_forests}")
         # Create empty CSV
-        df = pd.DataFrame(columns=['scientific_name'])
+        df = pd.DataFrame(columns=['common_name'])
         output_file = output_dir / "common_to_all_forests.csv"
         df.to_csv(output_file, index=False)
     
-    # 4. Summary statistics CSV
-    print("\n\n4. SUMMARY STATISTICS:")
+    # 4. Additional analysis: Birds in any two forests
+    print("\n\n4. BIRDS IN ANY TWO FORESTS:")
+    print("-" * 40)
+    
+    if len(valid_forests) >= 2:
+        # Get all possible pairs
+        forest_pairs = []
+        for i in range(len(valid_forests)):
+            for j in range(i+1, len(valid_forests)):
+                forest_pairs.append((valid_forests[i], valid_forests[j]))
+        
+        for forest1, forest2 in forest_pairs:
+            if forest1 in forest_birds and forest2 in forest_birds:
+                common_in_pair = forest_birds[forest1] & forest_birds[forest2]
+                if common_in_pair:
+                    df = pd.DataFrame(sorted(common_in_pair), columns=['common_name'])
+                    output_file = output_dir / f"common_in_{forest1}_and_{forest2}.csv"
+                    df.to_csv(output_file, index=False)
+                    print(f"\n{forest1.upper()} & {forest2.upper()}: {len(common_in_pair)} birds in common")
+                    print(f"Saved to: {output_file}")
+    
+    # 5. Summary statistics CSV
+    print("\n\n5. SUMMARY STATISTICS:")
     print("-" * 40)
     
     summary_data = []
     for forest in ['one', 'two', 'three']:
         if forest in forest_birds:
+            total_birds = len(forest_birds[forest])
+            
+            # Calculate exclusive birds
+            other_forests = [f for f in valid_forests if f != forest]
+            exclusive_birds = 0
+            if other_forests and forest in valid_forests:
+                birds_in_other_forests = set().union(*[forest_birds[f] for f in other_forests])
+                exclusive_birds = len(forest_birds[forest] - birds_in_other_forests)
+            
             summary_data.append({
                 'forest_type': forest,
-                'total_unique_birds': len(forest_birds[forest]),
-                'exclusive_birds': len(forest_birds[forest] - set().union(
-                    *[forest_birds[f] for f in valid_forests if f != forest]
-                )) if forest in valid_forests else 0
+                'total_unique_birds': total_birds,
+                'exclusive_birds': exclusive_birds
             })
     
     if summary_data:
@@ -201,15 +231,30 @@ def analyze_and_save_results(forest_birds):
         print("-" * 40)
         for row in summary_data:
             print(f"{row['forest_type'].upper():11} | {row['total_unique_birds']:11} | {row['exclusive_birds']:15}")
+        
+        # Calculate overall statistics
+        if len(valid_forests) >= 2:
+            all_birds = set().union(*[forest_birds[f] for f in valid_forests])
+            print(f"\nTotal unique birds across all forests: {len(all_birds)}")
+            
+            if len(valid_forests) == 3:
+                # Birds in at least 2 forests
+                birds_in_multiple = set()
+                for i in range(len(valid_forests)):
+                    for j in range(i+1, len(valid_forests)):
+                        birds_in_multiple.update(forest_birds[valid_forests[i]] & forest_birds[valid_forests[j]])
+                
+                print(f"Birds found in at least 2 forests: {len(birds_in_multiple)}")
     
-    return valid_forests
+    return valid_forests, forest_birds
 
 def main():
     print("=" * 60)
     print("FOREST BIRD DISTRIBUTION ANALYSIS")
     print("=" * 60)
     print("Input: Excel files (.xlsx) with 'Beobachtungen' sheet")
-    print("Output: CSV files in 'results' folder")
+    print("Output: CSV files in 'results_common_name' folder")
+    print("Using: COMMON NAMES (not scientific names)")
     print("Confidence threshold: > 0.8")
     print("Forest types: one, two, three")
     print("=" * 60)
@@ -225,17 +270,25 @@ def main():
         forest_data = process_forest_data()
         
         # Analyze and save results
-        valid_forests = analyze_and_save_results(forest_data)
+        valid_forests, all_forest_data = analyze_and_save_results(forest_data)
         
         print("\n" + "=" * 60)
         print("ANALYSIS COMPLETE!")
         print("=" * 60)
-        print(f"\nResults saved to 'results' folder:")
+        print(f"\nResults saved to 'results_common_name' folder:")
         print("  - [forest]_unique_birds.csv: All birds in each forest")
         print("  - [forest]_exclusive_birds.csv: Birds only in that forest")
         print("  - common_to_all_forests.csv: Birds in all three forests")
+        print("  - common_in_X_and_Y.csv: Birds common between forest pairs")
         print("  - summary_statistics.csv: Counts and statistics")
         print(f"\nProcessed data from {len(valid_forests)} forest(s): {valid_forests}")
+        
+        # Additional information
+        if valid_forests:
+            print(f"\nTotal birds found in each forest:")
+            for forest in ['one', 'two', 'three']:
+                if forest in all_forest_data:
+                    print(f"  {forest.upper()}: {len(all_forest_data[forest])} unique bird species")
         
     except Exception as e:
         print(f"\nUnexpected error: {e}")
